@@ -1,0 +1,12 @@
+{
+  "name": "fiap-simple-deploy-app",
+  "version": "1.0.0",
+  "description": "Configuração mínima para deploy de index.html estático para o trabalho da FIAP.",
+  "main": "index.html",
+  "scripts": {
+    "test": "echo 'No-op test' && exit 0",
+    "build": "powershell \"New-Item -ItemType Directory -Force dist; Copy-Item index.html dist/index.html\""
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

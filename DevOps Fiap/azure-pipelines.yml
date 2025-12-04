@@ -1,0 +1,123 @@
+# Arquivo: azure-pipelines.yml
+
+trigger:
+  - main
+
+variables:
+  azureSubscription: 'sc-devops-fiap'
+  webAppName: 'WA-devops-fiap'
+  projectPath: '.'
+  outputFolder: 'dist'
+
+stages:
+
+# ==========================================================
+# STAGE 1: BUILD (Agente Self-Hosted)
+# ==========================================================
+- stage: Build
+  displayName: '1. Build Simples'
+  jobs:
+  - job: BuildJob
+
+    # 👇 Seu agente self-hosted (PC_CAINÃ)
+    pool:
+      name: Default
+
+    steps:
+
+    - task: NodeTool@0
+      displayName: '1. Configurar Node.js 20.x'
+      inputs:
+        versionSpec: '20.x'
+
+    - task: Npm@1
+      displayName: '2. Instalar Dependências'
+      inputs:
+        command: 'install'
+        workingDir: '$(projectPath)'
+
+    - task: Npm@1
+      displayName: '3. Executar Build (Copiar index.html → dist)'
+      inputs:
+        command: 'custom'
+        customCommand: 'run build'
+        workingDir: '$(projectPath)'
+
+    - task: PublishBuildArtifacts@1
+      displayName: '4. Publicar Artefato'
+      inputs:
+        pathToPublish: '$(projectPath)/$(outputFolder)'
+        artifactName: 'drop'
+
+
+# ==========================================================
+# STAGE 2: DEPLOY (Hosted Ubuntu)
+# ==========================================================
+- stage: Deploy
+  displayName: '2. Deploy para App Service'
+  dependsOn: Build
+  condition: succeeded()
+
+  jobs:
+  - deployment: DeployJob
+    displayName: 'Deployment Job'
+    environment: dev     # 👈 Obrigatório
+
+    pool:
+      #vmImage: 'ubuntu-latest'
+      name: Default
+      
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          - download: current
+            artifact: drop
+
+          - task: AzureWebApp@1
+            displayName: 'Deploy para App Service'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              appName: '$(webAppName)'
+              package: '$(Pipeline.Workspace)/drop'
+
+# ==========================================================
+# STAGE 3: Pós-Deploy (Ping + Validação)
+# ==========================================================
+- stage: PostDeploy
+  displayName: '3. Pós-Deploy'
+  dependsOn: Deploy
+  condition: succeeded()
+
+  jobs:
+  - job: ValidateSite
+    displayName: 'Validação do App Service'
+    pool:
+      #vmImage: 'ubuntu-latest'
+      name: Default
+
+    steps:
+
+      # 🔍 1. Ping simples (DNS + rede)
+      - script: |
+          echo "Fazendo ping no site..."
+          ping -c 4 "$(webAppName).azurewebsites.net"
+        displayName: "Ping na URL do App Service"
+
+      # 🌐 2. Validação HTTP 200 usando curl
+      - script: |
+          echo "Validando resposta HTTP..."
+
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}\n" https://$(webAppName).azurewebsites.net)
+
+          echo "Status retornado: $STATUS"
+
+          if [ "$STATUS" -ne 200 ]; then
+            echo "❌ A validação falhou! O site não retornou HTTP 200."
+            exit 1
+          fi
+
+          echo "✔️ Site respondendo corretamente com HTTP 200!"
+        displayName: "Validação HTTP 200"
+
